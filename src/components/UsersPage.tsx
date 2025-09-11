@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,10 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
-import { Avatar, AvatarFallback, AvatarInitials } from './ui/avatar';
+import { Avatar, AvatarFallback } from './ui/avatar';
 import { Plus, Search, Edit, Trash2, User, Mail, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../App';
+import api from '@/lib/api';
 
 interface User {
   id: string;
@@ -88,6 +89,35 @@ export function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserFullName, setNewUserFullName] = useState('');
+  const [newUserUsername, setNewUserUsername] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState<User['role'] | ''>('');
+
+  // Load real users from backend if available
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const list = await api.listUsers();
+        // map backend fields to frontend User shape
+        const mapped: User[] = (list as any[]).map((u) => ({
+          id: String(u.id),
+          username: u.username,
+          email: u.email,
+          name: u.full_name || u.username || u.email,
+          role: (u.role === 'responsable' ? 'responsible' : u.role === 'technicien' ? 'technician' : u.role) as User['role'],
+          active: u.is_active ?? true,
+          created_date: u.created_at || new Date().toISOString(),
+          last_login: u.last_login || undefined,
+        }));
+        setUsers(mapped);
+      } catch (e) {
+        // keep mock if backend not available
+      }
+    };
+    load();
+  }, []);
 
   // Check if current user is admin
   if (currentUser?.role !== 'admin') {
@@ -105,7 +135,7 @@ export function UsersPage() {
     );
   }
 
-  const filteredUsers = users.filter(user => {
+  const filteredUsers = users.filter((user: User) => {
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.username.toLowerCase().includes(searchTerm.toLowerCase());
@@ -117,16 +147,29 @@ export function UsersPage() {
     return matchesSearch && matchesRole && matchesStatus;
   });
 
-  const handleToggleActive = (userId: string, active: boolean) => {
-    setUsers(users.map(user => 
-      user.id === userId ? { ...user, active } : user
-    ));
-    toast.success(`Utilisateur ${active ? 'activé' : 'désactivé'} avec succès`);
+  const handleToggleActive = async (userId: string, active: boolean) => {
+    setUsers((prev: User[]) => prev.map((user: User) => user.id === userId ? { ...user, active } : user));
+    try {
+      if (active) await api.activateUser(Number(userId));
+      else await api.disableUser(Number(userId));
+      toast.success(`Utilisateur ${active ? 'activé' : 'désactivé'} avec succès`);
+    } catch (e: any) {
+      // revert on error
+  setUsers((prev: User[]) => prev.map((user: User) => user.id === userId ? { ...user, active: !active } : user));
+      toast.error('Échec de la mise à jour du statut utilisateur');
+    }
   };
 
-  const handleDeleteUser = (userId: string) => {
-    setUsers(users.filter(user => user.id !== userId));
-    toast.success('Utilisateur supprimé avec succès');
+  const handleDeleteUser = async (userId: string) => {
+    const backup = users;
+    setUsers(users.filter((user: User) => user.id !== userId));
+    try {
+      await api.disableUser(Number(userId));
+      toast.success('Utilisateur désactivé');
+    } catch {
+      setUsers(backup);
+      toast.error("Échec de la suppression/désactivation");
+    }
   };
 
   const UserForm = ({ user, isEdit = false }: { user?: User; isEdit?: boolean }) => (
@@ -134,22 +177,25 @@ export function UsersPage() {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Nom complet</Label>
-          <Input placeholder="Nom complet" defaultValue={user?.name} />
+          <Input placeholder="Nom complet" defaultValue={user?.name} onChange={(e) => !isEdit && setNewUserFullName(e.target.value)} />
         </div>
         <div>
           <Label>Nom d'utilisateur</Label>
-          <Input placeholder="username" defaultValue={user?.username} disabled={isEdit} />
+          <Input placeholder="username" defaultValue={user?.username} disabled={isEdit} onChange={(e) => !isEdit && setNewUserUsername(e.target.value)} />
         </div>
       </div>
       
       <div>
         <Label>Email</Label>
-        <Input type="email" placeholder="email@example.com" defaultValue={user?.email} />
+        <Input type="email" placeholder="email@example.com" defaultValue={user?.email} onChange={(e) => !isEdit && setNewUserEmail(e.target.value)} />
       </div>
       
       <div>
         <Label>Rôle</Label>
-        <Select defaultValue={user?.role}>
+        <Select defaultValue={user?.role} onValueChange={(val) => {
+          if (isEdit && user) setSelectedUser({ ...user, role: val as User['role'] });
+          if (!isEdit) setNewUserRole(val as User['role']);
+        }}>
           <SelectTrigger>
             <SelectValue placeholder="Sélectionner un rôle" />
           </SelectTrigger>
@@ -165,7 +211,7 @@ export function UsersPage() {
       {!isEdit && (
         <div>
           <Label>Mot de passe</Label>
-          <Input type="password" placeholder="Mot de passe" />
+            <Input type="password" placeholder="Mot de passe" onChange={(e) => setNewUserPassword(e.target.value)} />
         </div>
       )}
       
@@ -357,9 +403,46 @@ export function UsersPage() {
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
               Annuler
             </Button>
-            <Button onClick={() => {
-              setShowCreateDialog(false);
-              toast.success('Utilisateur créé avec succès');
+            <Button onClick={async () => {
+              try {
+                const roleMap: Record<User['role'], 'admin' | 'responsable' | 'technicien' | 'client'> = {
+                  admin: 'admin',
+                  responsible: 'responsable',
+                  technician: 'technicien',
+                  client: 'client',
+                };
+                if (!newUserFullName || !newUserUsername || !newUserEmail || !newUserRole || !newUserPassword) {
+                  toast.error('Veuillez remplir tous les champs');
+                  return;
+                }
+                const created = await api.createUser({
+                  username: newUserUsername,
+                  full_name: newUserFullName,
+                  email: newUserEmail,
+                  role: roleMap[newUserRole],
+                  password: newUserPassword,
+                });
+                const u: any = created;
+                const mapped: User = {
+                  id: String(u.id),
+                  username: u.username,
+                  email: u.email,
+                  name: u.full_name,
+                  role: (newUserRole as User['role']),
+                  active: true,
+                  created_date: new Date().toISOString(),
+                };
+                setUsers((prev: User[]) => [mapped, ...prev]);
+                setShowCreateDialog(false);
+                setNewUserFullName('');
+                setNewUserUsername('');
+                setNewUserEmail('');
+                setNewUserRole('');
+                setNewUserPassword('');
+                toast.success('Utilisateur créé avec succès');
+              } catch (e) {
+                toast.error("Échec de création d'utilisateur");
+              }
             }}>
               Créer
             </Button>

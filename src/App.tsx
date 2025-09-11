@@ -17,6 +17,7 @@ import { DocumentsPage } from './components/DocumentsPage';
 import { ProfilePage } from './components/ProfilePage';
 import { HelpPage } from './components/HelpPage';
 import { Toaster } from './components/ui/sonner';
+import { toast } from 'sonner';
 
 // Types
 export interface User {
@@ -171,7 +172,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                 <SidebarTrigger />
                 <div className="hidden md:flex items-center gap-2">
                   <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                    ✅ Template Demo - Toutes fonctionnalités actives
+                    ✅ Connecté au serveur backend
                   </Badge>
                 </div>
               </div>
@@ -258,7 +259,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDark, setIsDark] = useState(false);
 
-  // Try restore from backend token, else mock user
+  // Try restore from backend token, else stay logged out
   useEffect(() => {
     const init = async () => {
       try {
@@ -281,13 +282,12 @@ export default function App() {
           };
           setUser(mapped);
           localStorage.setItem('user', JSON.stringify(mapped));
-        } else {
-          const savedUser = localStorage.getItem('user');
-          if (savedUser) setUser(JSON.parse(savedUser));
         }
-      } catch {
-        const savedUser = localStorage.getItem('user');
-        if (savedUser) setUser(JSON.parse(savedUser));
+      } catch (error) {
+        console.error('Failed to restore user session:', error);
+        // Clear invalid token
+        setToken(null);
+        localStorage.removeItem('user');
       } finally {
         setIsLoading(false);
       }
@@ -304,10 +304,13 @@ export default function App() {
   }, [isDark]);
 
   const login = async (username: string, password: string): Promise<boolean> => {
-    // First try real backend
     try {
       const token = await api.loginWithUsername(username, password);
       setToken(token.access_token);
+
+      // Small delay to ensure token is properly stored
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       const me: any = await api.me();
       const roleMap: Record<string, User['role']> = {
         admin: 'admin',
@@ -325,51 +328,13 @@ export default function App() {
       setUser(mapped);
       localStorage.setItem('user', JSON.stringify(mapped));
       return true;
-    } catch {
-      // Backend fallback: demo accounts
+    } catch (error) {
+      console.error('Login failed:', error);
+      toast.error('Échec de la connexion', {
+        description: 'Vérifiez vos identifiants et assurez-vous que le serveur backend est en cours d\'exécution.'
+      });
+      return false;
     }
-
-    // Demo accounts
-    const mockUsers = {
-      'admin': {
-        id: '1',
-        username: 'admin',
-        email: 'admin@mif.ma',
-        name: 'Administrateur Système',
-        role: 'admin' as const
-      },
-      'responsable': {
-        id: '2',
-        username: 'responsable',
-        email: 'responsable@mif.ma',
-        name: 'Responsable Maintenance',
-        role: 'responsible' as const
-      },
-      'technicien': {
-        id: '3',
-        username: 'technicien',
-        email: 'technicien@mif.ma',
-        name: 'Technicien Principal',
-        role: 'technician' as const
-      },
-      'client': {
-        id: '4',
-        username: 'client',
-        email: 'client@mif.ma',
-        name: 'Client Test',
-        role: 'client' as const
-      }
-    };
-
-    // Vérification des identifiants (username = password pour simplicité)
-    if (mockUsers[username as keyof typeof mockUsers] && username === password) {
-      const selectedUser = mockUsers[username as keyof typeof mockUsers];
-      setUser(selectedUser);
-      localStorage.setItem('user', JSON.stringify(selectedUser));
-      return true;
-    }
-    
-    return false;
   };
 
   const logout = () => {
@@ -394,7 +359,7 @@ export default function App() {
     <AuthContext.Provider value={{ user, login, logout, isLoading }}>
       <ThemeContext.Provider value={{ isDark, toggleTheme }}>
         <div className={isDark ? 'dark' : ''}>
-          {user ? <AppLayout>{null}</AppLayout> : <AuthPage />}
+          {user && !isLoading ? <AppLayout>{null}</AppLayout> : <AuthPage />}
           <Toaster />
         </div>
       </ThemeContext.Provider>

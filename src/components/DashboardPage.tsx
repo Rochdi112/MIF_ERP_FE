@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Calendar, Clock, AlertCircle, CheckCircle, Users, Wrench, Settings, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import { dashboardApi } from '@/lib/api';
+import { toast } from 'sonner';
 
 const interventionData = [
   { month: 'Jan', corrective: 12, preventive: 8 },
@@ -78,6 +80,82 @@ const getPriorityBadge = (priority: string) => {
 };
 
 export function DashboardPage() {
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await dashboardApi.getStats();
+        setStats(data);
+        toast.success('Données chargées avec succès');
+      } catch (error) {
+        console.error('Failed to load dashboard stats:', error);
+        setError('Impossible de charger les statistiques. Vérifiez la connexion au serveur.');
+        toast.error('Erreur lors du chargement des statistiques', {
+          description: 'Vérifiez que le serveur backend est en cours d\'exécution.'
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadStats();
+  }, []);
+
+  // Use real data if available, otherwise show error
+  const currentStats = stats || {
+    interventions: {
+      ouverte: 0,
+      en_cours: 0,
+      en_attente: 0,
+      terminees: 0,
+      total_mensuel: 0,
+      terminees_mensuel: 0
+    },
+    taux_resolution: 0,
+    evolution_mensuelle: [],
+    priorites: { urgente: 0, haute: 0, normale: 0, basse: 0 },
+    equipements: { total: 0, operationnel: 0, maintenance: 0 },
+    utilisateurs: { total: 0, actifs: 0 }
+  };
+
+  const realStatusData = [
+    { name: 'Ouvertes', value: currentStats.interventions.ouverte, color: '#6B7280' },
+    { name: 'En cours', value: currentStats.interventions.en_cours, color: '#2563EB' },
+    { name: 'En attente', value: currentStats.interventions.en_attente, color: '#F59E0B' },
+    { name: 'Terminées', value: currentStats.interventions.terminees, color: '#10B981' },
+  ];
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1>Tableau de bord</h1>
+          <p className="text-muted-foreground">
+            Vue d'ensemble des interventions et de l'activité de maintenance
+          </p>
+        </div>
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-4">
+              <AlertCircle className="h-8 w-8 text-red-500" />
+              <div>
+                <h3 className="text-lg font-semibold text-red-800">Connexion au serveur impossible</h3>
+                <p className="text-red-600 mt-1">{error}</p>
+                <p className="text-sm text-red-500 mt-2">
+                  Assurez-vous que le serveur backend est en cours d'exécution sur http://localhost:8000
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -97,7 +175,7 @@ export function DashboardPage() {
             <AlertCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">12</div>
+            <div className="text-2xl font-bold">{currentStats.interventions.ouverte}</div>
             <p className="text-xs text-muted-foreground">
               +2 depuis hier
             </p>
@@ -112,7 +190,7 @@ export function DashboardPage() {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">8</div>
+            <div className="text-2xl font-bold">{currentStats.interventions.en_cours}</div>
             <p className="text-xs text-muted-foreground">
               -1 depuis hier
             </p>
@@ -127,7 +205,7 @@ export function DashboardPage() {
             <CheckCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">25</div>
+            <div className="text-2xl font-bold">{currentStats.interventions.terminees_mensuel}</div>
             <p className="text-xs text-muted-foreground">
               +15% par rapport au mois dernier
             </p>
@@ -142,8 +220,71 @@ export function DashboardPage() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">94%</div>
-            <Progress value={94} className="mt-2" />
+            <div className="text-2xl font-bold">{currentStats.taux_resolution}%</div>
+            <Progress value={currentStats.taux_resolution} className="mt-2" />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Additional KPI Cards */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Équipements totaux
+            </CardTitle>
+            <Settings className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{currentStats.equipements.total}</div>
+            <p className="text-xs text-muted-foreground">
+              {currentStats.equipements.operationnel} opérationnels
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Équipements en maintenance
+            </CardTitle>
+            <Wrench className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{currentStats.equipements.maintenance}</div>
+            <p className="text-xs text-muted-foreground">
+              {((currentStats.equipements.maintenance / currentStats.equipements.total) * 100).toFixed(1)}% du total
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Utilisateurs actifs
+            </CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{currentStats.utilisateurs.actifs}</div>
+            <p className="text-xs text-muted-foreground">
+              sur {currentStats.utilisateurs.total} utilisateurs
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Priorités urgentes
+            </CardTitle>
+            <AlertCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{currentStats.priorites.urgente}</div>
+            <p className="text-xs text-muted-foreground">
+              interventions prioritaires
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -159,13 +300,12 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={interventionData}>
+              <BarChart data={currentStats.evolution_mensuelle}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="corrective" stackId="a" fill="#EF4444" name="Correctives" />
-                <Bar dataKey="preventive" stackId="a" fill="#10B981" name="Préventives" />
+                <Bar dataKey="total" fill="#3B82F6" name="Total interventions" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -183,7 +323,7 @@ export function DashboardPage() {
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
-                  data={statusData}
+                  data={realStatusData}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
@@ -192,7 +332,7 @@ export function DashboardPage() {
                   fill="#8884d8"
                   dataKey="value"
                 >
-                  {statusData.map((entry, index) => (
+                  {realStatusData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>

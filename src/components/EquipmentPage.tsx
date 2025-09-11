@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -10,6 +10,7 @@ import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
 import { Plus, Search, Edit, Trash2, Settings, Calendar, Wrench, Eye } from 'lucide-react';
 import { toast } from 'sonner';
+import api from '@/lib/api';
 
 interface Equipment {
   id: string;
@@ -26,50 +27,7 @@ interface Equipment {
   total_interventions: number;
 }
 
-const mockEquipments: Equipment[] = [
-  {
-    id: 'EQ-001',
-    name: 'Compresseur A1',
-    description: 'Compresseur principal de la ligne de production A',
-    model: 'CAT-500X',
-    serial_number: 'SN123456789',
-    manufacturer: 'Atlas Copco',
-    installation_date: '2020-03-15',
-    location: 'Atelier A - Zone 1',
-    status: 'operational',
-    last_maintenance: '2025-08-01',
-    next_maintenance: '2025-09-01',
-    total_interventions: 15
-  },
-  {
-    id: 'EQ-002',
-    name: 'Machine B3',
-    description: 'Machine de découpe automatisée',
-    model: 'DCT-200',
-    serial_number: 'SN987654321',
-    manufacturer: 'Haas Automation',
-    installation_date: '2021-07-22',
-    location: 'Atelier B - Zone 3',
-    status: 'maintenance',
-    last_maintenance: '2025-08-25',
-    next_maintenance: '2025-09-15',
-    total_interventions: 8
-  },
-  {
-    id: 'EQ-003',
-    name: 'Ligne C',
-    description: 'Ligne de production complète',
-    model: 'PROD-LINE-C',
-    serial_number: 'SN456789123',
-    manufacturer: 'Siemens',
-    installation_date: '2019-11-10',
-    location: 'Atelier C',
-    status: 'breakdown',
-    last_maintenance: '2025-07-15',
-    next_maintenance: '2025-08-30',
-    total_interventions: 22
-  }
-];
+const mockEquipments: Equipment[] = [];
 
 const getStatusBadge = (status: string) => {
   const statusConfig = {
@@ -91,6 +49,36 @@ export function EquipmentPage() {
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
+  const [formName, setFormName] = useState('');
+  const [formType, setFormType] = useState('');
+  const [formLocation, setFormLocation] = useState('');
+  const [formFreq, setFormFreq] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const list = await api.listEquipments();
+        const mapped: Equipment[] = (list as any[]).map((e) => ({
+          id: String(e.id),
+          name: e.nom,
+          description: e.type,
+          model: undefined,
+          serial_number: undefined,
+          manufacturer: undefined,
+          installation_date: '',
+          location: e.localisation,
+          status: 'operational',
+          last_maintenance: undefined,
+          next_maintenance: undefined,
+          total_interventions: 0,
+        }));
+        setEquipments(mapped);
+      } catch {
+        // keep mock
+      }
+    };
+    load();
+  }, []);
 
   const filteredEquipments = equipments.filter(equipment => {
     const matchesSearch = equipment.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -107,7 +95,7 @@ export function EquipmentPage() {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Nom de l'équipement</Label>
-          <Input placeholder="Nom de l'équipement" defaultValue={equipment?.name} />
+          <Input placeholder="Nom de l'équipement" value={formName} onChange={(e) => setFormName(e.target.value)} />
         </div>
         <div>
           <Label>Modèle</Label>
@@ -117,7 +105,7 @@ export function EquipmentPage() {
       
       <div>
         <Label>Description</Label>
-        <Textarea placeholder="Description détaillée" defaultValue={equipment?.description} />
+        <Textarea placeholder="Type (catégorie)" value={formType} onChange={(e) => setFormType(e.target.value)} />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -134,7 +122,7 @@ export function EquipmentPage() {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Emplacement</Label>
-          <Input placeholder="Emplacement" defaultValue={equipment?.location} />
+          <Input placeholder="Emplacement" value={formLocation} onChange={(e) => setFormLocation(e.target.value)} />
         </div>
         <div>
           <Label>Statut</Label>
@@ -153,11 +141,8 @@ export function EquipmentPage() {
       </div>
 
       <div>
-        <Label>Date d'installation</Label>
-        <Input 
-          type="date" 
-          defaultValue={equipment?.installation_date} 
-        />
+        <Label>Fréquence d'entretien (optionnel)</Label>
+        <Input placeholder="mensuel / trimestriel ..." value={formFreq} onChange={(e) => setFormFreq(e.target.value)} />
       </div>
     </div>
   );
@@ -448,9 +433,14 @@ export function EquipmentPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => {
-                          setEquipments(equipments.filter(e => e.id !== equipment.id));
-                          toast.success('Équipement supprimé');
+                        onClick={async () => {
+                          try {
+                            await api.deleteEquipment(equipment.id);
+                            setEquipments(equipments.filter(e => e.id !== equipment.id));
+                            toast.success('Équipement supprimé');
+                          } catch {
+                            toast.error('Échec de suppression');
+                          }
                         }}
                         className="text-red-600 hover:text-red-700"
                       >
@@ -484,10 +474,50 @@ export function EquipmentPage() {
             }}>
               Annuler
             </Button>
-            <Button onClick={() => {
-              setShowCreateDialog(false);
-              setSelectedEquipment(null);
-              toast.success(selectedEquipment ? 'Équipement modifié avec succès' : 'Équipement créé avec succès');
+            <Button onClick={async () => {
+              if (selectedEquipment) {
+                toast.info('Modification non disponible via l\'API');
+                setShowCreateDialog(false);
+                setSelectedEquipment(null);
+                return;
+              }
+              if (!formName || !formType || !formLocation) {
+                toast.error('Nom, type et localisation sont requis');
+                return;
+              }
+              try {
+                await api.createEquipment({
+                  nom: formName,
+                  type: formType,
+                  localisation: formLocation,
+                  frequence_entretien: formFreq || undefined,
+                });
+                toast.success('Équipement créé avec succès');
+                setFormName('');
+                setFormType('');
+                setFormLocation('');
+                setFormFreq('');
+                setShowCreateDialog(false);
+                // refresh list
+                const list = await api.listEquipments();
+                const mapped: Equipment[] = (list as any[]).map((e) => ({
+                  id: String(e.id),
+                  name: e.nom,
+                  description: e.type,
+                  model: undefined,
+                  serial_number: undefined,
+                  manufacturer: undefined,
+                  installation_date: '',
+                  location: e.localisation,
+                  status: 'operational',
+                  last_maintenance: undefined,
+                  next_maintenance: undefined,
+                  total_interventions: 0,
+                }));
+                setEquipments(mapped);
+              } catch {
+                toast.error('Échec de création');
+              }
             }}>
               {selectedEquipment ? 'Sauvegarder' : 'Créer'}
             </Button>

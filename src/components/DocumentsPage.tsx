@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from './ui/label';
 import { FileText, Upload, Download, Search, Filter, Trash2, Eye, Calendar, User } from 'lucide-react';
 import { toast } from 'sonner';
+import api, { API_BASE } from '@/lib/api';
 
 interface Document {
   id: string;
@@ -102,13 +103,46 @@ export function DocumentsPage() {
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [interventions, setInterventions] = useState<Array<{ id: string; title: string }>>([]);
+  const [selectedUploadInterventionId, setSelectedUploadInterventionId] = useState<string>('');
+  const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const filteredDocuments = documents.filter(document => {
-    const matchesSearch = document.nom_fichier.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         document.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         document.intervention_title?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesType = typeFilter === 'all' || document.type_mime.startsWith(typeFilter);
-    const matchesIntervention = interventionFilter === 'all' || document.intervention_id === interventionFilter;
+  // Load documents from backend on mount
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [docs, ints] = await Promise.all([
+          api.listDocuments(),
+          api.listInterventions(),
+        ]);
+        const mappedDocs: Document[] = (docs as any[]).map((d) => ({
+          id: String(d.id),
+          nom_fichier: d.filename,
+          chemin: d.path,
+          taille: 0,
+          type_mime: d.mime || 'application/octet-stream',
+          intervention_id: d.intervention_id != null ? String(d.intervention_id) : undefined,
+          uploaded_by: d.uploaded_by || 'N/A',
+          upload_date: d.date_upload,
+          description: d.description || undefined,
+        }));
+        const mappedInts = (ints as any[]).map((i) => ({ id: String(i.id), title: i.titre || `Intervention ${i.id}` }));
+        setDocuments(mappedDocs);
+        setInterventions(mappedInts);
+      } catch {
+        // keep mock
+      }
+    };
+    load();
+  }, []);
+
+  const filteredDocuments = documents.filter((doc: Document) => {
+    const matchesSearch = doc.nom_fichier.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         doc.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         doc.intervention_title?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesType = typeFilter === 'all' || doc.type_mime.startsWith(typeFilter);
+    const matchesIntervention = interventionFilter === 'all' || doc.intervention_id === interventionFilter;
     
     return matchesSearch && matchesType && matchesIntervention;
   });
@@ -151,36 +185,61 @@ export function DocumentsPage() {
     setDragOver(false);
   }, []);
 
-  const handleFileUpload = () => {
-    // Simulation d'upload pour le template
-    uploadedFiles.forEach(file => {
-      const newDocument: Document = {
-        id: `DOC-${Date.now()}`,
-        nom_fichier: file.name,
-        chemin: `/uploads/${crypto.randomUUID()}.${file.name.split('.').pop()}`,
-        taille: file.size,
-        type_mime: file.type,
-        uploaded_by: 'Utilisateur actuel',
-        upload_date: new Date().toISOString(),
-        description: `Document uploadé: ${file.name}`
-      };
-      
-      setDocuments(prev => [newDocument, ...prev]);
-    });
-    
-    toast.success(`${uploadedFiles.length} fichier(s) uploadé(s) avec succès`);
-    setUploadedFiles([]);
-    setShowUploadDialog(false);
+  const handleFileUpload = async () => {
+    try {
+      if (!selectedUploadInterventionId) {
+        toast.error("Veuillez sélectionner une intervention à lier");
+        return;
+      }
+      for (const file of uploadedFiles) {
+        const created = await api.uploadDocument(Number(selectedUploadInterventionId), file);
+        const d: any = created;
+        const newDoc: Document = {
+          id: String(d.id || Date.now()),
+          nom_fichier: d.filename || file.name,
+          chemin: d.path || '',
+          taille: file.size,
+          type_mime: file.type,
+          uploaded_by: d.uploaded_by || 'Moi',
+          upload_date: d.date_upload || new Date().toISOString(),
+          intervention_id: String(d.intervention_id || selectedUploadInterventionId),
+          description: d.description || `Document uploadé: ${file.name}`,
+        };
+        setDocuments(prev => [newDoc, ...prev]);
+      }
+      toast.success(`${uploadedFiles.length} fichier(s) uploadé(s) avec succès`);
+      setUploadedFiles([]);
+      setSelectedUploadInterventionId('');
+      setShowUploadDialog(false);
+    } catch (e) {
+      toast.error("Échec d'upload des documents");
+    }
   };
 
-  const handleDownload = (document: Document) => {
-    // Simulation de téléchargement pour le template
-    toast.success(`Téléchargement de ${document.nom_fichier} démarré`);
+  const handleDownload = (doc: Document) => {
+    const href = doc.chemin.startsWith('http') ? doc.chemin : `${API_BASE}${doc.chemin}`;
+    try {
+      const link = window.document.createElement('a');
+      link.href = href;
+      link.download = doc.nom_fichier;
+      window.document.body.appendChild(link);
+      link.click();
+      window.document.body.removeChild(link);
+    } catch {
+      window.open(href, '_blank');
+    }
   };
 
-  const handleDelete = (documentId: string) => {
-    setDocuments(documents.filter(doc => doc.id !== documentId));
-    toast.success('Document supprimé avec succès');
+  const handleDelete = async (documentId: string) => {
+    const prev = documents;
+    try {
+      setDocuments((d) => d.filter((x) => x.id !== documentId));
+      await api.deleteDocument(documentId);
+      toast.success('Document supprimé');
+    } catch (e) {
+      setDocuments(prev);
+      toast.error('Échec de suppression du document');
+    }
   };
 
   const DropZone = () => (
@@ -197,7 +256,36 @@ export function DocumentsPage() {
       <p className="text-sm text-muted-foreground mb-4">
         ou cliquez pour sélectionner
       </p>
-      <Button variant="outline">
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="application/pdf,image/jpeg,image/png,image/gif"
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files || []);
+          const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif'];
+          const maxSize = 10 * 1024 * 1024;
+          const validFiles = files.filter(file => {
+            if (!validTypes.includes(file.type)) {
+              toast.error(`Type de fichier non supporté: ${file.name}`);
+              return false;
+            }
+            if (file.size > maxSize) {
+              toast.error(`Fichier trop volumineux: ${file.name} (max 10MB)`);
+              return false;
+            }
+            return true;
+          });
+          if (validFiles.length) {
+            setUploadedFiles(validFiles);
+            setShowUploadDialog(true);
+          }
+          // reset to allow re-selecting the same files later
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }}
+      />
+      <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
         Parcourir les fichiers
       </Button>
       <p className="text-xs text-muted-foreground mt-2">
@@ -218,15 +306,15 @@ export function DocumentsPage() {
         
         <div className="space-y-4">
           <div>
-            <Label>Intervention liée (optionnel)</Label>
-            <Select>
+            <Label>Intervention liée</Label>
+            <Select value={selectedUploadInterventionId} onValueChange={setSelectedUploadInterventionId}>
               <SelectTrigger>
                 <SelectValue placeholder="Sélectionner une intervention" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="INT-001">INT-001 - Maintenance compresseur A1</SelectItem>
-                <SelectItem value="INT-002">INT-002 - Révision machine B3</SelectItem>
-                <SelectItem value="INT-003">INT-003 - Réparation ligne C</SelectItem>
+                {interventions.map((i) => (
+                  <SelectItem key={i.id} value={i.id}>{i.id} - {i.title}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -384,9 +472,9 @@ export function DocumentsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Toutes les interventions</SelectItem>
-                  <SelectItem value="INT-001">INT-001 - Compresseur A1</SelectItem>
-                  <SelectItem value="INT-002">INT-002 - Machine B3</SelectItem>
-                  <SelectItem value="INT-003">INT-003 - Ligne C</SelectItem>
+                  {interventions.map((i) => (
+                    <SelectItem key={i.id} value={i.id}>{i.id} - {i.title}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -481,7 +569,7 @@ export function DocumentsPage() {
                       >
                         <Download className="h-3 w-3" />
                       </Button>
-                      <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" onClick={() => setPreviewDoc(document)}>
                         <Eye className="h-3 w-3" />
                       </Button>
                       <Button
@@ -502,6 +590,45 @@ export function DocumentsPage() {
       </Card>
 
       <UploadDialog />
+
+      {/* Preview Dialog */}
+  <Dialog open={!!previewDoc} onOpenChange={(open: boolean) => !open && setPreviewDoc(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Aperçu du document</DialogTitle>
+            <DialogDescription>
+              {previewDoc?.nom_fichier}
+            </DialogDescription>
+          </DialogHeader>
+          {previewDoc && (
+            <div className="h-[70vh] w-full">
+              {previewDoc.type_mime.startsWith('image/') ? (
+                <img
+                  src={previewDoc.chemin.startsWith('http') ? previewDoc.chemin : `${API_BASE}${previewDoc.chemin}`}
+                  alt={previewDoc.nom_fichier}
+                  className="max-h-full max-w-full object-contain mx-auto"
+                />
+              ) : previewDoc.type_mime === 'application/pdf' ? (
+                <iframe
+                  title={previewDoc.nom_fichier}
+                  src={(previewDoc.chemin.startsWith('http') ? previewDoc.chemin : `${API_BASE}${previewDoc.chemin}`) + '#toolbar=1'}
+                  className="w-full h-full border rounded"
+                />
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  Aperçu non disponible pour ce type de fichier.
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewDoc(null)}>Fermer</Button>
+            {previewDoc && (
+              <Button onClick={() => handleDownload(previewDoc)}>Télécharger</Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

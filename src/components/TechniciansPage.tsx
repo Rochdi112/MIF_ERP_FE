@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from './ui/avatar';
 import { Switch } from './ui/switch';
 import { Plus, Search, Edit, Trash2, User, Wrench, Star } from 'lucide-react';
 import { toast } from 'sonner';
+import api from '@/lib/api';
 
 interface Technician {
   id: string;
@@ -28,53 +29,7 @@ interface Technician {
   hire_date: string;
 }
 
-const mockTechnicians: Technician[] = [
-  {
-    id: 'TECH-001',
-    user_id: '2',
-    name: 'Mohammed Alami',
-    email: 'mohammed.alami@mif.ma',
-    team: 'Équipe A',
-    specialization: 'Mécanique industrielle',
-    competencies: ['Compresseurs', 'Hydraulique', 'Pneumatique', 'Soudure'],
-    availability: 'busy',
-    active_interventions: 2,
-    completed_interventions: 45,
-    rating: 4.8,
-    phone: '0661234567',
-    hire_date: '2022-03-15'
-  },
-  {
-    id: 'TECH-002',
-    user_id: '3',
-    name: 'Fatima Bennani',
-    email: 'fatima.bennani@mif.ma',
-    team: 'Équipe B',
-    specialization: 'Électricité industrielle',
-    competencies: ['Automatisme', 'Électronique', 'Câblage', 'API'],
-    availability: 'available',
-    active_interventions: 1,
-    completed_interventions: 38,
-    rating: 4.9,
-    phone: '0662345678',
-    hire_date: '2021-09-10'
-  },
-  {
-    id: 'TECH-003',
-    user_id: '4',
-    name: 'Youssef Khalil',
-    email: 'youssef.khalil@mif.ma',
-    team: 'Équipe A',
-    specialization: 'Maintenance préventive',
-    competencies: ['Lubrification', 'Alignement', 'Vibration', 'Thermographie'],
-    availability: 'unavailable',
-    active_interventions: 0,
-    completed_interventions: 28,
-    rating: 4.6,
-    phone: '0663456789',
-    hire_date: '2023-01-20'
-  }
-];
+const mockTechnicians: Technician[] = [];
 
 const getAvailabilityBadge = (availability: string) => {
   const availabilityConfig = {
@@ -89,11 +44,54 @@ const getAvailabilityBadge = (availability: string) => {
 
 export function TechniciansPage() {
   const [technicians, setTechnicians] = useState<Technician[]>(mockTechnicians);
+  const [users, setUsers] = useState<any[]>([]);
+  const [competences, setCompetences] = useState<{ id: number; nom: string }[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [teamFilter, setTeamFilter] = useState('all');
   const [availabilityFilter, setAvailabilityFilter] = useState('all');
   const [selectedTechnician, setSelectedTechnician] = useState<Technician | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+
+  // Form state for create
+  const [formUserId, setFormUserId] = useState<string>('');
+  const [formTeam, setFormTeam] = useState<string>('');
+  const [formAvailability, setFormAvailability] = useState<'available' | 'busy' | 'unavailable' | ''>('');
+  const [formCompetencies, setFormCompetencies] = useState<string[]>([]);
+  const [formPhone, setFormPhone] = useState<string>('');
+  const [formHireDate, setFormHireDate] = useState<string>('');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [techs, us, comps] = await Promise.all([
+          api.listTechnicians(),
+          api.listUsers(),
+          api.listCompetences(),
+        ]);
+        const mapped: Technician[] = (techs as any[]).map((t) => ({
+          id: String(t.id),
+          user_id: String(t.user?.id ?? ''),
+          name: t.user?.full_name || t.user?.username || `Technicien ${t.id}`,
+          email: t.user?.email || '',
+          team: t.equipe || '-',
+          specialization: (t.competences || []).map((c: any) => c.nom).slice(0, 1).join(', ') || '-',
+          competencies: (t.competences || []).map((c: any) => c.nom),
+          availability: (t.disponibilite || 'available') as Technician['availability'],
+          active_interventions: 0,
+          completed_interventions: 0,
+          rating: 0,
+          phone: '',
+          hire_date: '',
+        }));
+        setTechnicians(mapped);
+        setUsers(us as any[]);
+        setCompetences((comps as any[]).map((c) => ({ id: c.id, nom: c.nom })));
+      } catch {
+        // keep mock
+      }
+    };
+    load();
+  }, []);
 
   const filteredTechnicians = technicians.filter(technician => {
     const matchesSearch = technician.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -106,29 +104,20 @@ export function TechniciansPage() {
   });
 
   const TechnicianForm = ({ technician }: { technician?: Technician }) => {
-    const [selectedCompetencies, setSelectedCompetencies] = useState<string[]>(
-      technician?.competencies || []
-    );
-
-    const allCompetencies = [
-      'Compresseurs', 'Hydraulique', 'Pneumatique', 'Soudure',
-      'Automatisme', 'Électronique', 'Câblage', 'API',
-      'Lubrification', 'Alignement', 'Vibration', 'Thermographie',
-      'Usinage', 'Mécanique générale', 'Climatisation'
-    ];
-
     return (
       <div className="space-y-4">
         <div>
           <Label>Utilisateur lié</Label>
-          <Select defaultValue={technician?.user_id}>
+          <Select value={formUserId} onValueChange={setFormUserId}>
             <SelectTrigger>
               <SelectValue placeholder="Sélectionner un utilisateur" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="2">Mohammed Alami</SelectItem>
-              <SelectItem value="3">Fatima Bennani</SelectItem>
-              <SelectItem value="4">Youssef Khalil</SelectItem>
+              {users.map((u) => (
+                <SelectItem key={u.id} value={String(u.id)}>
+                  {u.full_name || u.username} ({u.email})
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -136,7 +125,7 @@ export function TechniciansPage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label>Équipe</Label>
-            <Select defaultValue={technician?.team}>
+            <Select value={formTeam} onValueChange={setFormTeam}>
               <SelectTrigger>
                 <SelectValue placeholder="Sélectionner" />
               </SelectTrigger>
@@ -149,16 +138,15 @@ export function TechniciansPage() {
           </div>
 
           <div>
-            <Label>Spécialisation</Label>
-            <Select defaultValue={technician?.specialization}>
+            <Label>Disponibilité</Label>
+            <Select value={formAvailability} onValueChange={(v: string) => setFormAvailability(v as any)}>
               <SelectTrigger>
                 <SelectValue placeholder="Sélectionner" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Mécanique industrielle">Mécanique industrielle</SelectItem>
-                <SelectItem value="Électricité industrielle">Électricité industrielle</SelectItem>
-                <SelectItem value="Maintenance préventive">Maintenance préventive</SelectItem>
-                <SelectItem value="Automatisme">Automatisme</SelectItem>
+                <SelectItem value="available">Disponible</SelectItem>
+                <SelectItem value="busy">Occupé</SelectItem>
+                <SelectItem value="unavailable">Indisponible</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -166,27 +154,24 @@ export function TechniciansPage() {
 
         <div>
           <Label>Téléphone</Label>
-          <Input placeholder="0661234567" defaultValue={technician?.phone} />
+          <Input placeholder="0661234567" value={formPhone} onChange={(e) => setFormPhone(e.target.value)} />
         </div>
 
         <div>
           <Label>Compétences</Label>
           <div className="grid grid-cols-3 gap-2 mt-2">
-            {allCompetencies.map((competency) => (
-              <label key={competency} className="flex items-center space-x-2">
+            {competences.map((c) => (
+              <label key={c.id} className="flex items-center space-x-2">
                 <input
                   type="checkbox"
-                  checked={selectedCompetencies.includes(competency)}
+                  checked={formCompetencies.includes(c.nom)}
                   onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedCompetencies([...selectedCompetencies, competency]);
-                    } else {
-                      setSelectedCompetencies(selectedCompetencies.filter(c => c !== competency));
-                    }
+                    if (e.target.checked) setFormCompetencies([...formCompetencies, c.nom]);
+                    else setFormCompetencies(formCompetencies.filter((n) => n !== c.nom));
                   }}
                   className="rounded"
                 />
-                <span className="text-sm">{competency}</span>
+                <span className="text-sm">{c.nom}</span>
               </label>
             ))}
           </div>
@@ -194,7 +179,7 @@ export function TechniciansPage() {
 
         <div>
           <Label>Date d'embauche</Label>
-          <Input type="date" defaultValue={technician?.hire_date} />
+          <Input type="date" value={formHireDate} onChange={(e) => setFormHireDate(e.target.value)} />
         </div>
       </div>
     );
@@ -404,6 +389,11 @@ export function TechniciansPage() {
                         size="sm"
                         onClick={() => {
                           setSelectedTechnician(technician);
+                          // Prefill form fields for edit
+                          setFormUserId(technician.user_id || '');
+                          setFormTeam(technician.team || '');
+                          setFormAvailability(technician.availability || '');
+                          setFormCompetencies(technician.competencies || []);
                           setShowCreateDialog(true);
                         }}
                       >
@@ -412,9 +402,14 @@ export function TechniciansPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => {
-                          setTechnicians(technicians.filter(t => t.id !== technician.id));
-                          toast.success('Technicien supprimé');
+                        onClick={async () => {
+                          try {
+                            await api.deleteTechnician(technician.id);
+                            setTechnicians((prev) => prev.filter((t) => t.id !== technician.id));
+                            toast.success('Technicien supprimé');
+                          } catch {
+                            toast.error('Échec de suppression');
+                          }
                         }}
                         className="text-red-600 hover:text-red-700"
                       >
@@ -448,10 +443,98 @@ export function TechniciansPage() {
             }}>
               Annuler
             </Button>
-            <Button onClick={() => {
-              setShowCreateDialog(false);
-              setSelectedTechnician(null);
-              toast.success(selectedTechnician ? 'Technicien modifié avec succès' : 'Technicien créé avec succès');
+            <Button onClick={async () => {
+              if (selectedTechnician) {
+                try {
+                  // Map UI availability -> backend enum
+                  const dispoMap: Record<string, string> = {
+                    available: 'disponible',
+                    busy: 'occupe',
+                    unavailable: 'indisponible',
+                  };
+                  const dispoBackend = formAvailability ? (dispoMap[formAvailability] || formAvailability) : undefined;
+                  await api.updateTechnician(selectedTechnician.id, {
+                    equipe: formTeam || undefined,
+                    disponibilite: dispoBackend,
+                  });
+                  toast.success('Technicien mis à jour');
+                  setShowCreateDialog(false);
+                  setSelectedTechnician(null);
+                  // refresh list
+                  const techs = await api.listTechnicians();
+                  const mapped: Technician[] = (techs as any[]).map((t) => ({
+                    id: String(t.id),
+                    user_id: String(t.user?.id ?? ''),
+                    name: t.user?.full_name || t.user?.username || `Technicien ${t.id}`,
+                    email: t.user?.email || '',
+                    team: t.equipe || '-',
+                    specialization: (t.competences || []).map((c: any) => c.nom).slice(0, 1).join(', ') || '-',
+                    competencies: (t.competences || []).map((c: any) => c.nom),
+                    availability: (t.disponibilite || 'available') as Technician['availability'],
+                    active_interventions: 0,
+                    completed_interventions: 0,
+                    rating: 0,
+                    phone: '',
+                    hire_date: '',
+                  }));
+                  setTechnicians(mapped);
+                } catch {
+                  toast.error('Échec de mise à jour');
+                }
+                return;
+              }
+              // Create technician
+              try {
+                if (!formUserId) {
+                  toast.error('Veuillez sélectionner un utilisateur');
+                  return;
+                }
+                // Map UI availability -> backend enum
+                const dispoMap: Record<string, string> = {
+                  available: 'disponible',
+                  busy: 'occupe',
+                  unavailable: 'indisponible',
+                };
+                const dispoBackend = formAvailability ? (dispoMap[formAvailability] || formAvailability) : undefined;
+                const ids = formCompetencies
+                  .map((nom) => competences.find((c) => c.nom === nom)?.id)
+                  .filter((id): id is number => typeof id === 'number');
+                await api.createTechnician({
+                  user_id: Number(formUserId),
+                  equipe: formTeam || undefined,
+                  disponibilite: dispoBackend,
+                  competences_ids: ids.length ? ids : undefined,
+                });
+                toast.success('Technicien créé avec succès');
+                setShowCreateDialog(false);
+                setSelectedTechnician(null);
+                setFormUserId('');
+                setFormTeam('');
+                setFormAvailability('');
+                setFormCompetencies([]);
+                setFormPhone('');
+                setFormHireDate('');
+                // refresh list
+                const techs = await api.listTechnicians();
+                const mapped: Technician[] = (techs as any[]).map((t) => ({
+                  id: String(t.id),
+                  user_id: String(t.user?.id ?? ''),
+                  name: t.user?.full_name || t.user?.username || `Technicien ${t.id}`,
+                  email: t.user?.email || '',
+                  team: t.equipe || '-',
+                  specialization: (t.competences || []).map((c: any) => c.nom).slice(0, 1).join(', ') || '-',
+                  competencies: (t.competences || []).map((c: any) => c.nom),
+                  availability: (t.disponibilite || 'available') as Technician['availability'],
+                  active_interventions: 0,
+                  completed_interventions: 0,
+                  rating: 0,
+                  phone: '',
+                  hire_date: '',
+                }));
+                setTechnicians(mapped);
+              } catch (e: any) {
+                toast.error('Échec de création du technicien');
+              }
             }}>
               {selectedTechnician ? 'Sauvegarder' : 'Créer'}
             </Button>

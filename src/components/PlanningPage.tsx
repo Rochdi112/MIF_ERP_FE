@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -11,6 +11,7 @@ import { Calendar as CalendarIcon, Plus, Settings, Clock, Edit, Trash2, Filter }
 import { Calendar } from './ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { toast } from 'sonner';
+import api from '@/lib/api';
 // Note: date-fns would need to be installed in a real project
 const format = (date: Date, formatStr: string, options?: any) => {
   return date.toLocaleDateString('fr-FR', {
@@ -36,50 +37,7 @@ interface PreventiveMaintenance {
   active: boolean;
 }
 
-const mockPlanning: PreventiveMaintenance[] = [
-  {
-    id: 'PM-001',
-    equipment_id: 'EQ-001',
-    equipment_name: 'Compresseur A1',
-    title: 'Maintenance préventive mensuelle',
-    description: 'Vérification générale, graissage et remplacement des filtres',
-    frequency_type: 'monthly',
-    frequency_value: 1,
-    next_date: '2025-09-01',
-    last_executed: '2025-08-01',
-    estimated_duration: 4,
-    technician: 'Mohammed Alami',
-    active: true
-  },
-  {
-    id: 'PM-002',
-    equipment_id: 'EQ-002',
-    equipment_name: 'Machine B3',
-    title: 'Révision trimestrielle',
-    description: 'Contrôle approfondi et calibrage',
-    frequency_type: 'quarterly',
-    frequency_value: 1,
-    next_date: '2025-09-15',
-    last_executed: '2025-06-15',
-    estimated_duration: 8,
-    technician: 'Fatima Bennani',
-    active: true
-  },
-  {
-    id: 'PM-003',
-    equipment_id: 'EQ-003',
-    equipment_name: 'Ligne C',
-    title: 'Inspection hebdomadaire',
-    description: 'Vérification routinière des composants',
-    frequency_type: 'weekly',
-    frequency_value: 1,
-    next_date: '2025-08-30',
-    last_executed: '2025-08-23',
-    estimated_duration: 2,
-    technician: 'Youssef Khalil',
-    active: true
-  }
-];
+const mockPlanning: PreventiveMaintenance[] = [];
 
 const getFrequencyLabel = (type: string, value: number) => {
   const labels = {
@@ -118,6 +76,42 @@ export function PlanningPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PreventiveMaintenance | null>(null);
+  const [formTitle, setFormTitle] = useState('');
+  const [formDescription, setFormDescription] = useState('');
+  const [formEquipmentId, setFormEquipmentId] = useState('');
+  const [formFrequency, setFormFrequency] = useState('monthly');
+  const [formNextDate, setFormNextDate] = useState<string>('');
+  const [equipments, setEquipments] = useState<{ id: number; nom: string }[]>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [plans, eqs] = await Promise.all([
+          api.listPlannings(),
+          api.listEquipments(),
+        ]);
+        const mapped: PreventiveMaintenance[] = (plans as any[]).map((p) => ({
+          id: String(p.id),
+          equipment_id: String(p.equipement_id),
+          equipment_name: `#${p.equipement_id}`,
+          title: `Planning ${p.id}`,
+          description: '',
+          frequency_type: 'monthly',
+          frequency_value: 1,
+          next_date: p.prochaine_date || '',
+          last_executed: p.derniere_date || '',
+          estimated_duration: 0,
+          technician: '',
+          active: true,
+        }));
+        setPlanning(mapped);
+        setEquipments((eqs as any[]).map((e) => ({ id: e.id, nom: e.nom })));
+      } catch {
+        // keep mock
+      }
+    };
+    load();
+  }, []);
 
   const filteredPlanning = planning.filter(plan => {
     const matchesEquipment = equipmentFilter === 'all' || plan.equipment_id === equipmentFilter;
@@ -219,25 +213,25 @@ export function PlanningPage() {
     <div className="space-y-4">
       <div>
         <Label>Titre</Label>
-        <Input placeholder="Titre de la maintenance" defaultValue={plan?.title} />
+        <Input placeholder="Titre de la maintenance" value={formTitle} onChange={(e) => setFormTitle(e.target.value)} />
       </div>
       
       <div>
         <Label>Description</Label>
-        <Input placeholder="Description détaillée" defaultValue={plan?.description} />
+        <Input placeholder="Description détaillée" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Équipement</Label>
-          <Select defaultValue={plan?.equipment_id}>
+          <Select value={formEquipmentId} onValueChange={setFormEquipmentId}>
             <SelectTrigger>
               <SelectValue placeholder="Sélectionner" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="EQ-001">Compresseur A1</SelectItem>
-              <SelectItem value="EQ-002">Machine B3</SelectItem>
-              <SelectItem value="EQ-003">Ligne C</SelectItem>
+              {equipments.map((e) => (
+                <SelectItem key={e.id} value={String(e.id)}>{e.nom}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -260,7 +254,7 @@ export function PlanningPage() {
       <div className="grid grid-cols-3 gap-4">
         <div>
           <Label>Fréquence</Label>
-          <Select defaultValue={plan?.frequency_type}>
+          <Select value={formFrequency} onValueChange={setFormFrequency}>
             <SelectTrigger>
               <SelectValue placeholder="Type" />
             </SelectTrigger>
@@ -304,8 +298,8 @@ export function PlanningPage() {
           <PopoverContent className="w-auto p-0">
             <Calendar
               mode="single"
-              selected={plan ? new Date(plan.next_date) : undefined}
-              onSelect={() => {}}
+              selected={formNextDate ? new Date(formNextDate) : undefined}
+              onSelect={(d: Date | undefined) => setFormNextDate(d ? d.toISOString() : '')}
               initialFocus
             />
           </PopoverContent>
@@ -442,6 +436,12 @@ export function PlanningPage() {
                             size="sm"
                             onClick={() => {
                               setSelectedPlan(plan);
+                              // prefill form
+                              setFormTitle(plan.title || '');
+                              setFormDescription(plan.description || '');
+                              setFormEquipmentId(plan.equipment_id);
+                              setFormFrequency(plan.frequency_type);
+                              setFormNextDate(plan.next_date || '');
                               setShowCreateDialog(true);
                             }}
                           >
@@ -450,9 +450,46 @@ export function PlanningPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => {
-                              setPlanning(planning.filter(p => p.id !== plan.id));
-                              toast.success('Planning supprimé');
+                            onClick={async () => {
+                              // quick replanify: push to today
+                              try {
+                                const iso = new Date().toISOString();
+                                await api.updatePlanningNextDate(plan.id, iso);
+                                toast.success('Prochaine date mise à jour');
+                                const plans = await api.listPlannings();
+                                const mapped: PreventiveMaintenance[] = (plans as any[]).map((p) => ({
+                                  id: String(p.id),
+                                  equipment_id: String(p.equipement_id),
+                                  equipment_name: `#${p.equipement_id}`,
+                                  title: `Planning ${p.id}`,
+                                  description: '',
+                                  frequency_type: 'monthly',
+                                  frequency_value: 1,
+                                  next_date: p.prochaine_date || '',
+                                  last_executed: p.derniere_date || '',
+                                  estimated_duration: 0,
+                                  technician: '',
+                                  active: true,
+                                }));
+                                setPlanning(mapped);
+                              } catch {
+                                toast.error('Échec de replanification');
+                              }
+                            }}
+                          >
+                            Replanifier
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                await api.deletePlanning(plan.id);
+                                setPlanning(planning.filter(p => p.id !== plan.id));
+                                toast.success('Planning supprimé');
+                              } catch {
+                                toast.error('Échec de suppression');
+                              }
                             }}
                             className="text-red-600 hover:text-red-700"
                           >
@@ -488,10 +525,55 @@ export function PlanningPage() {
             }}>
               Annuler
             </Button>
-            <Button onClick={() => {
-              setShowCreateDialog(false);
-              setSelectedPlan(null);
-              toast.success(selectedPlan ? 'Planning modifié avec succès' : 'Planning créé avec succès');
+            <Button onClick={async () => {
+              if (!formEquipmentId || !formFrequency) {
+                toast.error('Équipement et fréquence sont requis');
+                return;
+              }
+              try {
+                if (selectedPlan) {
+                  await api.updatePlanning(selectedPlan.id, {
+                    equipement_id: Number(formEquipmentId),
+                    frequence: formFrequency,
+                    prochaine_date: formNextDate || undefined,
+                    derniere_date: selectedPlan.last_executed || undefined,
+                  });
+                  toast.success('Planning mis à jour');
+                } else {
+                  await api.createPlanning({
+                    equipement_id: Number(formEquipmentId),
+                    frequence: formFrequency,
+                    prochaine_date: formNextDate || undefined,
+                  });
+                  toast.success('Planning créé avec succès');
+                }
+                setFormTitle('');
+                setFormDescription('');
+                setFormEquipmentId('');
+                setFormFrequency('monthly');
+                setFormNextDate('');
+                setShowCreateDialog(false);
+                setSelectedPlan(null);
+                // refresh
+                const plans = await api.listPlannings();
+                const mapped: PreventiveMaintenance[] = (plans as any[]).map((p) => ({
+                  id: String(p.id),
+                  equipment_id: String(p.equipement_id),
+                  equipment_name: `#${p.equipement_id}`,
+                  title: `Planning ${p.id}`,
+                  description: '',
+                  frequency_type: 'monthly',
+                  frequency_value: 1,
+                  next_date: p.prochaine_date || '',
+                  last_executed: p.derniere_date || '',
+                  estimated_duration: 0,
+                  technician: '',
+                  active: true,
+                }));
+                setPlanning(mapped);
+              } catch {
+                toast.error(selectedPlan ? 'Échec de mise à jour' : 'Échec de création');
+              }
             }}>
               {selectedPlan ? 'Sauvegarder' : 'Créer'}
             </Button>
